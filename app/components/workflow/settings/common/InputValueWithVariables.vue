@@ -1,27 +1,39 @@
 <script setup lang="ts">
-import { watch } from 'vue';
+import { watch, ref, computed } from 'vue';
 import { useEditor, EditorContent, VueNodeViewRenderer } from '@tiptap/vue-3';
 import StarterKit from '@tiptap/starter-kit';
 import Mention from '@tiptap/extension-mention';
-import { PlusOutlined } from '@ant-design/icons-vue';
+import {
+  PlusOutlined,
+  DownOutlined,
+  FolderOutlined,
+  FileOutlined,
+} from '@ant-design/icons-vue';
 import MentionNodeView from './MentionNodeView.vue';
+import sampleVariables from '~/data/sampleVariablesTree';
 
 export interface VariableOption {
   id: string | number;
   label: string;
 }
 
+interface VariableTreeNode {
+  title: string;
+  key: string | number;
+  children?: VariableTreeNode[];
+  isLeaf?: boolean;
+  selectable?: boolean;
+}
+
 const props = withDefaults(
   defineProps<{
     modelValue?: string;
-    variables?: VariableOption[];
     placeholder?: string;
     disabled?: boolean;
   }>(),
   {
     modelValue: '',
-    variables: () => [],
-    placeholder: 'Type @ to insert a variable…',
+    placeholder: '',
     disabled: false,
   },
 );
@@ -29,6 +41,56 @@ const props = withDefaults(
 const emit = defineEmits<{
   'update:modelValue': [value: string];
 }>();
+
+const variableDropdownOpen = ref(false);
+const variableSearch = ref('');
+
+const variableTreeData = computed<VariableTreeNode[]>(() => {
+  const vars = sampleVariables;
+
+  if (!vars.length) {
+    return [];
+  }
+
+  return vars;
+});
+
+function filterTree(
+  nodes: VariableTreeNode[],
+  query: string,
+): VariableTreeNode[] {
+  const q = query.toLowerCase();
+  const result: VariableTreeNode[] = [];
+
+  nodes.forEach((node) => {
+    const titleMatch = node.title.toLowerCase().includes(q);
+    const children = node.children
+      ? filterTree(node.children, query)
+      : undefined;
+
+    if (!titleMatch && (!children || !children.length)) {
+      return;
+    }
+
+    result.push({
+      ...node,
+      ...(children && children.length ? { children } : {}),
+    });
+  });
+
+  return result;
+}
+
+const filteredVariableTreeData = computed<VariableTreeNode[]>(() => {
+  const tree = variableTreeData.value;
+  const query = variableSearch.value.trim();
+
+  if (!query) {
+    return tree;
+  }
+
+  return filterTree(tree, query);
+});
 
 const editor = useEditor({
   content: props.modelValue || '',
@@ -102,17 +164,36 @@ watch(
   { immediate: true },
 );
 
-function addVariable() {
+function insertVariableMention(variable: VariableOption) {
   editor.value
     ?.chain()
     .focus()
     .insertContent([
       {
         type: 'mention',
-        attrs: { id: '1', label: 'Hello', mentionSuggestionChar: '' },
+        attrs: {
+          id: String(variable.id),
+          label: variable.label,
+          mentionSuggestionChar: '',
+        },
       },
     ])
     .run();
+}
+
+function handleVariableSelect(_keys: (string | number)[], info: { node: any }) {
+  const node = info?.node;
+
+  if (!node || node.selectable === false || (!node.isLeaf && node.children)) {
+    return;
+  }
+
+  insertVariableMention({
+    id: node.key,
+    label: node.title,
+  });
+
+  variableDropdownOpen.value = false;
 }
 </script>
 
@@ -122,12 +203,74 @@ function addVariable() {
       :editor="editor"
       class="input-value-with-variables__content"
     />
-    <a-button type="text" size="small" @click="addVariable">
-      <template #icon>
-        <PlusOutlined />
+    <a-dropdown
+      v-model:open="variableDropdownOpen"
+      trigger="['click']"
+      placement="bottomLeft"
+    >
+      <a-button type="text" size="small">
+        <template #icon>
+          <PlusOutlined />
+        </template>
+      </a-button>
+      <template #overlay>
+        <div class="input-value-with-variables__dropdown">
+          <a-input
+            v-model:value="variableSearch"
+            allow-clear
+            class="input-value-with-variables__dropdown-search"
+            placeholder="Search values or select the following options"
+          />
+          <div class="input-value-with-variables__dropdown-content">
+            <div
+              class="input-value-with-variables__dropdown-formula-calculation-container"
+            >
+              <a-typography-text
+                class="input-value-with-variables__dropdown-formula-calculation"
+                >Formula Calculation</a-typography-text
+              >
+              <a-button
+                type="link"
+                class="input-value-with-variables__dropdown-formula-calculation-add-button"
+              >
+                <template #icon>
+                  <PlusOutlined />
+                </template>
+                Add Formula
+              </a-button>
+            </div>
+            <div
+              class="input-value-with-variables__dropdown-reference-value-container"
+            >
+              <a-typography-text
+                class="input-value-with-variables__dropdown-formula-calculation"
+                >Reference value</a-typography-text
+              >
+              <a-tree
+                v-if="filteredVariableTreeData.length"
+                :tree-data="filteredVariableTreeData"
+                :default-expand-all="false"
+                :block-node="true"
+                :selectable="true"
+                :show-icon="true"
+                @select="handleVariableSelect"
+              >
+                <template #switcherIcon="{ switcherCls }">
+                  <DownOutlined :class="switcherCls" />
+                </template>
+                <template #icon="{ data }">
+                  <component :is="data.itemIcon" v-if="data.itemIcon" />
+                  <FolderOutlined v-else />
+                </template>
+              </a-tree>
+              <div v-else class="input-value-with-variables__dropdown-empty">
+                No variables available
+              </div>
+            </div>
+          </div>
+        </div>
       </template>
-      Add variable
-    </a-button>
+    </a-dropdown>
   </div>
 </template>
 
@@ -152,4 +295,60 @@ function addVariable() {
   color: var(--ui-text-muted, #bfbfbf);
 }
 
+.input-value-with-variables__dropdown {
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px 0 12px;
+  width: 425px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+}
+
+.input-value-with-variables__dropdown-search {
+  width: calc(100% - 16px);
+  position: absolute;
+  top: 8px;
+  left: 8px;
+}
+
+.input-value-with-variables__dropdown-empty {
+  padding: 8px 12px;
+  color: var(--ui-text-muted, #bfbfbf);
+  font-size: 13px;
+}
+
+.input-value-with-variables__dropdown-formula-calculation-container {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 8px 12px;
+}
+
+.input-value-with-variables__dropdown-formula-calculation {
+  margin: 8px 0;
+  font-size: 13px;
+  color: var(--ui-text-muted, #bfbfbf);
+}
+
+.input-value-with-variables__dropdown-reference-value-container {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 8px 12px;
+}
+
+.input-value-with-variables__dropdown-formula-calculation-add-button {
+  padding: 0;
+  margin: 0;
+}
+
+.input-value-with-variables__dropdown-content {
+  padding-top: 32px;
+}
+:deep(.ant-tree .ant-tree-switcher) {
+  text-align: left;
+  width: 8px;
+}
 </style>

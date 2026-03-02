@@ -147,12 +147,6 @@ function onGroupsUpdate(groups: ConditionGroupOption[]) {
     <InputValueWithVariables
       v-model:model-value="payload.summary"
       label="Summary"
-      :variables="
-        selectedTableColumns.map((column) => ({
-          id: column.id,
-          label: column.name,
-        }))
-      "
       placeholder="Enter summary"
     />
   </template>
